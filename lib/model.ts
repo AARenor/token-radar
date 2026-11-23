@@ -14,8 +14,9 @@
 // The board includes every watchlist slug and up to 280 eligible pre-token protocols below the floor,
 // selected by TVL. Early candidates exclude CEX, versioned pools, and named wrapped or staking products.
 // The separate live view holds up to 24 market-cap-ranked protocols, excluding CEX.
-// Farm amounts of $25 or $10 and times of 5 to 15 minutes are illustrative, not observed fees or
-// eligibility claims. Network and product fees vary, and no reward is guaranteed.
+// Farm plans follow the recorded TVL band for the test ticket, the first listed chain for gas and
+// bridging, the recorded seven-day change and the listing age. Amounts and times are examples, not
+// observed fees or eligibility claims. Network and product fees vary, and no reward is guaranteed.
 
 /** One protocol in the sealed snapshot. */
 export interface SnapshotProtocol {
@@ -336,60 +337,279 @@ export function stepText(step: FarmStep): string {
 interface FarmContext {
   name: string;
   chain: string;
+  otherChains: string[];
+  category: string;
+  tvl: string;
+  depositText: string;
+  smallText: string;
+  share: string;
+  gas: string;
+  gasRange: string;
+  roundTrip: string;
+  momentum: number | null;
 }
 
-/** Actions are examples, conditional on the protocol actually supporting the product and route. */
+interface ChainGas {
+  range: string;
+  mid: number;
+}
+
+/** Typical mainnet cost of one approval plus one contract call; a plan filter, not a quote. */
+const CHAIN_GAS: Record<string, ChainGas> = {
+  Ethereum: { range: '$2 to $8', mid: 5 },
+  Arbitrum: { range: '$0.05 to $0.40', mid: 0.2 },
+  Optimism: { range: '$0.05 to $0.30', mid: 0.15 },
+  Base: { range: '$0.02 to $0.20', mid: 0.1 },
+  Binance: { range: '$0.05 to $0.30', mid: 0.15 },
+  Polygon: { range: '$0.01 to $0.10', mid: 0.04 },
+  Solana: { range: '$0.01 to $0.05', mid: 0.02 },
+  Avalanche: { range: '$0.05 to $0.60', mid: 0.3 },
+  Bitcoin: { range: '$2 to $10', mid: 6 },
+  Tron: { range: '$1 to $3', mid: 2 },
+  'Hyperliquid L1': { range: '$0.01 to $0.10', mid: 0.04 },
+  Monad: { range: '$0.01 to $0.10', mid: 0.04 },
+  Plasma: { range: '$0.01 to $0.10', mid: 0.04 },
+  Sonic: { range: '$0.01 to $0.10', mid: 0.04 },
+  Linea: { range: '$0.05 to $0.50', mid: 0.2 },
+  Scroll: { range: '$0.05 to $0.50', mid: 0.2 },
+  'zkSync Era': { range: '$0.05 to $0.50', mid: 0.2 },
+  Mantle: { range: '$0.02 to $0.20', mid: 0.08 },
+  Berachain: { range: '$0.02 to $0.20', mid: 0.08 },
+  Unichain: { range: '$0.02 to $0.20', mid: 0.08 },
+  Sui: { range: '$0.01 to $0.10', mid: 0.03 },
+  Celo: { range: '$0.01 to $0.10', mid: 0.03 },
+  Fantom: { range: '$0.01 to $0.10', mid: 0.04 },
+  xDai: { range: '$0.01 to $0.05', mid: 0.02 },
+  Sei: { range: '$0.01 to $0.10', mid: 0.04 },
+  Stellar: { range: '$0.01 to $0.05', mid: 0.02 },
+  Ripple: { range: '$0.01 to $0.05', mid: 0.02 },
+  TON: { range: '$0.01 to $0.05', mid: 0.03 },
+  Cardano: { range: '$0.10 to $0.50', mid: 0.25 },
+  'Robinhood Chain': { range: '$0.05 to $0.50', mid: 0.2 },
+  Arc: { range: '$0.01 to $0.10', mid: 0.04 },
+  Ink: { range: '$0.02 to $0.20', mid: 0.08 },
+  Katana: { range: '$0.01 to $0.10', mid: 0.04 },
+  Flare: { range: '$0.01 to $0.10', mid: 0.04 },
+};
+
+/** Gas for a chain outside the table, grouped by the fee market it resembles. */
+function chainGas(chain: string): ChainGas {
+  const known = CHAIN_GAS[chain];
+  if (known !== undefined) return known;
+  if (/bitcoin|btc|litecoin|dogecoin/i.test(chain)) return { range: '$1 to $10', mid: 4 };
+  if (/solana|sui|aptos|ton|near|stellar|ripple/i.test(chain)) return { range: '$0.01 to $0.10', mid: 0.04 };
+  if (/cosmos|osmosis|injective|kava|neutron|babylon|core|celestia|dydx/i.test(chain)) return { range: '$0.01 to $0.20', mid: 0.06 };
+  if (/eth|linea|scroll|zksync|arbitrum|optimism|base|polygon|gnosis|avalanche|fantom|celo|mantle|blast|berachain|unichain|ink|morph|world|bob|hemi|citrea|fluent|pharos|plume|stable|tempo|monad|plasma|sonic|telos|sei|x layer/i.test(chain)) {
+    return { range: '$0.02 to $0.50', mid: 0.2 };
+  }
+  return { range: '$0.10 to $2', mid: 0.5 };
+}
+
+/** How a deposit reaches the chain, stated as a typical cost rather than a quote. */
+function bridgeNote(chain: string): string {
+  if (/^ethereum$/i.test(chain)) return 'no bridge fee applies while the funds already sit on Ethereum.';
+  return 'if the funds start on Ethereum or another chain, a bridge hop costs about $1 to $5 plus gas on each side, or an exchange withdrawal avoids it.';
+}
+
+/** US dollars with thousands separators, for ticket sizes. */
+function money(n: number): string {
+  return `$${String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+}
+
+/** A short TVL label for use inside a sentence. */
+function compactUsd(n: number): string {
+  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${Math.round(n)}`;
+}
+
+/** The ticket as a share of recorded TVL, at a precision that survives small tickets. */
+function shareOf(part: number, whole: number): string {
+  const pct = (part / whole) * 100;
+  if (pct >= 1) return `${pct.toFixed(2)}%`;
+  if (pct >= 0.01) return `${pct.toFixed(3)}%`;
+  if (pct >= 0.000001) return `${pct.toFixed(6)}%`;
+  return 'less than 0.000001%';
+}
+
+/** An approximate dollar figure that keeps cents below one dollar. */
+function aboutUsd(n: number): string {
+  return n >= 1 ? `about $${Math.round(n)}` : `about $${n.toFixed(2)}`;
+}
+
+interface CapitalBand {
+  label: string;
+  deposit: number;
+  ceiling: string;
+}
+
+/** Test ticket and the price-impact level that would contradict the recorded TVL. */
+function capitalBand(tvl: number): CapitalBand {
+  if (tvl < 10_000_000) return { label: 'under $10M', deposit: 100, ceiling: '1%' };
+  if (tvl < 50_000_000) return { label: '$10M to $50M', deposit: 500, ceiling: '0.5%' };
+  if (tvl < 250_000_000) return { label: '$50M to $250M', deposit: 1_000, ceiling: '0.3%' };
+  return { label: 'above $250M', deposit: 5_000, ceiling: '0.1%' };
+}
+
+/** Wallet review, chain choice and the cost of reaching the first listed chain. */
+function routeStep(c: FarmContext, chainCount: number): FarmStep {
+  const route = chainCount === 0
+    ? 'No chain is recorded, so confirm the network before funding anything.'
+    : chainCount === 1
+      ? 'It is the only chain recorded, so one gas balance covers the whole test and no bridge is needed.'
+      : chainCount === 2
+        ? `The snapshot lists ${c.chain} and ${c.otherChains.join(' and ')}; the plan stays on ${c.chain} so every step shares one network.`
+        : `${chainCount} chains are recorded; this plan uses ${c.chain} for every step so the approval, the deposit and the exit stay on one route.`;
+  return {
+    text: `Open ${c.name} in a fresh wallet on ${c.chain} and find its ${c.category} product. ${route} Gas runs ${c.gasRange} per transaction; ${bridgeNote(c.chain)}`,
+    cost: '$0 of fees to review, plus the bridge fee only if funds must move',
+    time: '10 minutes',
+  };
+}
+
+/** Ticket size for the recorded TVL band, with the price impact that size implies. */
+function fundStep(c: FarmContext, band: CapitalBand): FarmStep {
+  return {
+    text: `Fund ${c.depositText} plus a buffer for gas. The snapshot records ${c.tvl} of TVL, the ${band.label} band, and ${c.depositText} is ${c.share} of that total: any price impact or fee in the preview should sit near that share, and a preview above ${band.ceiling} means the live venue is thinner than the recorded TVL suggests.`,
+    cost: `${c.depositText} test deposit plus ${c.gas}`,
+    time: '15 minutes',
+  };
+}
+
+/** The recorded seven-day change decides whether the next move is a warning or a watch. */
+function momentumStep(c: FarmContext): FarmStep {
+  if (c.momentum === null) {
+    return {
+      text: `The snapshot records no seven-day change for ${c.name}, so treat the trend as unknown rather than stable: read the TVL history in the app and keep the first ticket at ${c.smallText}.`,
+      cost: '$0 of fees to read the chart',
+      time: '5 minutes',
+    };
+  }
+  const figure = `${Math.abs(c.momentum).toFixed(2)}%`;
+  if (c.momentum < -0.05) {
+    return {
+      text: `The snapshot records TVL down ${figure} over seven days at ${c.tvl}. Before ${c.depositText} goes in, check whether the drop is asset prices falling or depositors leaving, and stay at ${c.smallText} until a week closes flat or higher.`,
+      cost: '$0 of fees to read the change',
+      time: '10 minutes',
+    };
+  }
+  if (c.momentum > 0.05) {
+    return {
+      text: `The snapshot records TVL up ${figure} over seven days at ${c.tvl}. Before adding, watch whether the next weekly figure holds and whether fee volume rises with it; TVL can jump from one large deposit without new users.`,
+      cost: '$0 of fees to watch the next print',
+      time: '10 minutes',
+    };
+  }
+  return {
+    text: `The snapshot records TVL flat over seven days at ${c.tvl}, so this is a clean week for the ${c.smallText} test; the thing to watch before adding size is the first move in either direction.`,
+    cost: '$0 of fees to read the change',
+    time: '5 minutes',
+  };
+}
+
+/** A first-week test for new listings, a trend read for mid-age ones, a withdrawal test for old ones. */
+function ageStep(c: FarmContext, age: number | null): FarmStep {
+  if (age === null) {
+    return {
+      text: `No listing date is recorded for ${c.name}, so the record cannot show whether it is early or seasoned: find the deployment date before raising size and keep the first deposit at ${c.smallText}.`,
+      cost: '$0 of fees to check the record',
+      time: '15 minutes',
+    };
+  }
+  if (age < 365) {
+    return {
+      text: `At ${age} days listed, ${c.name} is under a year old, so give it one small first week: deposit ${c.smallText} on day one, withdraw it on day seven, and only then commit the ${c.depositText} ticket.`,
+      cost: `${c.smallText} test deposit plus ${c.roundTrip}`,
+      time: '7 days',
+    };
+  }
+  if (age < 1095) {
+    const months = Math.round(age / 30.4);
+    return {
+      text: `${c.name} has about ${months} months listed, long enough to compare: read its TVL trend over that window and size the ticket from whether ${c.tvl} sits above or below the trend.`,
+      cost: '$0 of fees to read the history',
+      time: '20 minutes',
+    };
+  }
+  return {
+    text: `With ${age} days of record, ${c.name} can stand a real withdrawal test: deposit ${c.smallText}, withdraw it, and read the multi-year TVL trend before trusting the ${c.depositText} ticket to it.`,
+    cost: `${c.smallText} test deposit plus ${c.roundTrip}`,
+    time: '1 day',
+  };
+}
+
+/** Each sector keeps its own action, bound to the ticket, chain and category the row records. */
 const FARM_ACTIONS: Record<Sector, (c: FarmContext) => FarmStep[]> = {
-  Lending: ({ name, chain }) => [
-    { text: `Supply $25 of a supported asset to a ${name} lending market on ${chain}, if its minimum permits.`, cost: '$25 example deposit plus variable network fees', time: '10 minutes' },
-    { text: `After a week, check the ${name} position and withdraw a small amount if withdrawals are available.`, cost: 'Variable network fees and possible deposit losses', time: '5 minutes' },
+  Lending: (c) => [
+    { text: `Supply ${c.depositText} of an asset ${c.name} lists on ${c.chain} to the supply side of its ${c.category} market, then note the supply rate and collateral factor the app shows.`, cost: `${c.depositText} supplied plus ${c.gas}`, time: '15 minutes' },
+    { text: `If ${c.name} shows an open borrow market, borrow at most ${c.smallText} against the ${c.depositText} supplied, then check the health factor and liquidation price it reports.`, cost: `${c.smallText} borrowed plus ${c.gas}`, time: '20 minutes' },
   ],
-  DEX: ({ name, chain }) => [
-    { text: `Swap $10 of a supported token through a ${name} pool on ${chain}; review the price before confirming.`, cost: '$10 example trade plus variable swap and network fees', time: '5 minutes' },
-    { text: `If ${name} offers liquidity pools, add $25 across the two pool assets and review impermanent loss.`, cost: '$25 example liquidity plus variable network fees', time: '10 minutes' },
+  DEX: (c) => [
+    { text: `Swap ${c.smallText} through one ${c.name} pool on ${c.chain} and read the quoted price impact before signing; compare it with the ${c.share} of TVL that ticket represents.`, cost: `${c.smallText} swapped plus ${c.gas}`, time: '10 minutes' },
+    { text: `If ${c.name} shows a two-asset pool, add ${c.depositText} split across both sides on ${c.chain}, then write down the fee tier and the impermanent-loss range the app reports.`, cost: `${c.depositText} of liquidity plus ${c.gas}`, time: '20 minutes' },
   ],
-  Yield: ({ name, chain }) => [
-    { text: `Deposit $25 of a supported asset in a ${name} vault on ${chain}, if its minimum permits.`, cost: '$25 example deposit plus variable network fees', time: '10 minutes' },
-    { text: `Check the ${name} vault balance after a week and withdraw a small amount if the vault allows it.`, cost: 'Variable network fees and possible strategy losses', time: '5 minutes' },
+  Yield: (c) => [
+    { text: `Deposit ${c.depositText} into one ${c.name} ${c.category} product on ${c.chain}, after reading which strategy it runs and who can pause withdrawals.`, cost: `${c.depositText} deposited plus ${c.gas}`, time: '15 minutes' },
+    { text: `Leave ${c.name} a week, then withdraw ${c.smallText} and compare what came back with a plain hold of the same asset; that difference is the only return figure worth recording.`, cost: `${c.smallText} withdrawn plus ${c.gas}`, time: '7 days' },
   ],
-  Perp: ({ name, chain }) => [
-    { text: `If ${name} supports derivatives on ${chain}, deposit $25 of accepted margin and check the rules.`, cost: '$25 example margin plus variable network fees', time: '10 minutes' },
-    { text: `If a suitable market is available, open and close its smallest position at low leverage.`, cost: 'Variable trading fees and possible loss of margin', time: '10 minutes' },
+  Perp: (c) => [
+    { text: `Deposit ${c.depositText} of margin into ${c.name} on ${c.chain} and read the maximum leverage and liquidation price the market shows before opening anything.`, cost: `${c.depositText} of margin plus ${c.gas}`, time: '15 minutes' },
+    { text: `Open the smallest position ${c.name} allows at 2x or less, close it in the same session, and record the fees charged on the full round trip.`, cost: `${c.smallText} of position plus ${c.gas}`, time: '20 minutes' },
   ],
-  CDP: ({ name, chain }) => [
-    { text: `Supply $25 of accepted collateral to a ${name} vault on ${chain}, if its minimum permits.`, cost: '$25 example collateral plus variable network fees', time: '10 minutes' },
-    { text: `If the vault permits it, mint a small amount of its stablecoin and keep a wide liquidation buffer.`, cost: 'Variable network and stability fees; collateral is at risk', time: '10 minutes' },
+  CDP: (c) => [
+    { text: `Supply ${c.depositText} of a collateral asset ${c.name} accepts on ${c.chain} to open a vault, then read the liquidation threshold, minimum ratio and stability fee it displays.`, cost: `${c.depositText} of collateral plus ${c.gas}`, time: '20 minutes' },
+    { text: `Mint at most ${c.smallText} of stablecoin against that ${c.name} vault, keep the ratio well above the minimum, and repay all of it before the week ends.`, cost: `${c.smallText} minted plus ${c.gas}`, time: '30 minutes' },
   ],
-  'Liquid Staking-adjacent': ({ name, chain }) => [
-    { text: `Stake $25 of the asset supported by ${name} on ${chain} if the minimum and lockup are acceptable.`, cost: '$25 example stake plus variable network fees', time: '10 minutes' },
-    { text: `Check the ${name} receipt and withdrawal queue; request a small unstake if the product allows it.`, cost: 'Variable network fees and possible withdrawal delay', time: '5 minutes' },
+  'Liquid Staking-adjacent': (c) => [
+    { text: `Stake ${c.depositText} of an asset ${c.name} accepts on ${c.chain}, then read the validator set, commission and unbonding terms listed for the ${c.category} product.`, cost: `${c.depositText} staked plus ${c.gas}`, time: '15 minutes' },
+    { text: `If ${c.name} returns a receipt token, compare its balance with the ${c.depositText} staked, then request a ${c.smallText} unstake to see the queue the app reports.`, cost: `${c.smallText} unstaked plus ${c.gas}`, time: '1 day' },
   ],
-  'Bridge-adjacent': ({ name, chain }) => [
-    { text: `Use ${name} to bridge $25 of a supported asset on a route that includes ${chain}, if available.`, cost: '$25 example transfer plus variable bridge and network fees', time: '10 minutes' },
-    { text: `Check the destination wallet for the transfer, then return a small amount if a return route exists.`, cost: 'Variable bridge and network fees on the return route', time: '10 minutes' },
+  'Bridge-adjacent': (c) => [
+    { text: `Send ${c.depositText} of an asset ${c.name} supports over a route that ends on ${c.chain}, and read the bridge fee plus destination gas estimate before approving.`, cost: `${c.depositText} transferred plus ${c.gas}`, time: '20 minutes' },
+    { text: `Confirm the arrival in the destination wallet, then send ${c.smallText} back through ${c.name} to measure the round-trip time and what it charges.`, cost: `${c.smallText} returned plus ${c.gas}`, time: '30 minutes' },
   ],
-  Restaking: ({ name, chain }) => [
-    { text: `Review slashing and lockup terms, then restake $25 through ${name} on ${chain} if permitted.`, cost: '$25 example stake plus variable network fees and slashing risk', time: '15 minutes' },
-    { text: `Check the ${name} receipt and, if available, request a partial withdrawal and note the unbonding time.`, cost: 'Variable network fees and possible withdrawal delay', time: '5 minutes' },
+  Restaking: (c) => [
+    { text: `Read the slashing and unbonding terms ${c.name} lists, then restake ${c.depositText} on ${c.chain} only if the operator set and lockup are acceptable.`, cost: `${c.depositText} restaked plus ${c.gas}`, time: '20 minutes' },
+    { text: `Request a ${c.smallText} partial withdrawal from ${c.name} after the restake, note the unbonding time and fee the app reports, and keep the receipt where you can find it.`, cost: `${c.smallText} withdrawn plus ${c.gas}`, time: '1 day' },
   ],
-  RWA: ({ name, chain }) => [
-    { text: `Check ${name} eligibility, identity requirements, deposit minimum and redemption rules on ${chain}.`, cost: '$0 to review; identity checks may be required', time: '10 minutes' },
-    { text: `If eligible and the minimum permits, deposit $25 into a supported ${name} real-world asset vault.`, cost: '$25 example deposit plus variable fees; minimums may be higher', time: '15 minutes' },
+  RWA: (c) => [
+    { text: `Read ${c.name} eligibility, jurisdiction and redemption terms on ${c.chain} before depositing, because an identity check can block a ${c.depositText} ticket after the money is already there.`, cost: '$0 of fees to read the terms', time: '15 minutes' },
+    { text: `If eligible and the minimum is at or below ${c.depositText}, deposit that amount into the ${c.name} ${c.category} product and note the redemption window the app states.`, cost: `${c.depositText} deposited plus ${c.gas}`, time: '30 minutes' },
   ],
-  Other: ({ name, chain }) => [
-    { text: `Review the products ${name} lists on ${chain} and select one with terms and fees you understand.`, cost: '$0 to review the available product', time: '10 minutes' },
-    { text: `If the selected ${name} product accepts deposits, deposit $25 and check the resulting balance.`, cost: '$25 example deposit plus variable network fees', time: '10 minutes' },
+  Other: (c) => [
+    { text: `Read what ${c.name} offers on ${c.chain} under the ${c.category} label, and pick one product whose fees and exit terms you can repeat without the marketing page.`, cost: '$0 of fees to review the product', time: '15 minutes' },
+    { text: `If that ${c.name} product accepts deposits, deposit ${c.depositText}, confirm the balance appears, then withdraw ${c.smallText} the same day to test the exit.`, cost: `${c.depositText} deposited plus ${c.gas}`, time: '30 minutes' },
   ],
 };
 
-/** Four actionable steps from the recorded category and chain, with illustrative costs and times. */
-export function farmSteps(p: SnapshotProtocol, _age: number | null): FarmStep[] {
+/** Six steps from the row's own TVL band, chain, category, seven-day change and listing age. */
+export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const name = p.name.slice(0, 100);
-  const chain = (p.chains[0] || 'a supported network').slice(0, 80);
+  const chains = p.chains.map((chain) => chain.trim()).filter((chain) => chain.length > 0);
+  const chain = (chains[0] ?? 'a supported network').slice(0, 80);
+  const gas = chainGas(chain);
+  const band = capitalBand(p.tvl_usd);
+  const context: FarmContext = {
+    name,
+    chain,
+    otherChains: chains.slice(1, 3).map((other) => other.slice(0, 60)),
+    category: categoryOf(p.category).slice(0, 60),
+    tvl: compactUsd(p.tvl_usd),
+    depositText: money(band.deposit),
+    smallText: money(Math.max(20, Math.round(band.deposit / 5))),
+    share: shareOf(band.deposit, p.tvl_usd),
+    gas: `${aboutUsd(gas.mid)} of gas`,
+    gasRange: gas.range,
+    roundTrip: `${aboutUsd(gas.mid * 2)} of gas for the deposit and withdrawal`,
+    momentum: p.change_7d,
+  };
   return [
-    { text: `Open the ${name} app, choose ${chain}, and review its supported assets before connecting a compatible wallet.`, cost: '$0 before any transaction', time: '5 minutes' },
-    { text: `Fund a compatible wallet on ${chain} with an asset the app accepts and reserve funds for network fees.`, cost: '$25 example capital plus variable network fees', time: '10 minutes' },
-    ...FARM_ACTIONS[sectorOf(p.category)]({ name, chain }),
+    routeStep(context, chains.length),
+    fundStep(context, band),
+    ...FARM_ACTIONS[sectorOf(p.category)](context),
+    momentumStep(context),
+    ageStep(context, age),
   ];
 }
 
@@ -516,7 +736,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
       'Growth is clamped to -60% through 120% and weighted by 0.5; missing growth is treated as 0%.',
       'Maturity rises from 0.6 to 1.0 over 1,095 days; missing listing age uses 365 days.',
       'The sector risk adjustment is subjective. Implied value is an estimate, not a token price or a launch prediction.',
-      'Farm amounts and times are examples, fees vary, product availability is not verified, and a reward is not guaranteed.',
+      'Farm tickets follow the recorded TVL band; amounts and times are examples, fees vary, product availability is not verified, and a reward is not guaranteed.',
     ],
   };
   return { board, radar };
