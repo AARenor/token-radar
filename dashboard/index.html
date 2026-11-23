@@ -1,15 +1,91 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar: pre-token protocols ranked by implied value</title>
-<link rel="stylesheet" href="app.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Token Radar | make.fun</title>
+  <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<a class="skip" href="#board">Skip to the board</a>
-<main id="board" tabindex="-1" aria-busy="true"></main>
-<script src="../data.js"></script>
-<script src="app.js"></script>
+  <a class="skip" href="#board">Skip to the board</a>
+  <div class="page">
+    <header class="masthead">
+      <a class="brand" href="#top" aria-label="Token Radar home"><span class="brand-mark" aria-hidden="true"></span><span>make.fun <b>Token Radar</b></span></a>
+      <nav aria-label="Page sections"><a href="#board">Board</a><a href="#model">Model</a><a href="#live">Live tokens</a></nav>
+      <p class="snapshot">Snapshot <strong id="snapshot-date">Loading</strong></p>
+    </header>
+
+    <main id="top">
+      <section class="intro" aria-labelledby="page-title">
+        <div class="intro-copy">
+          <h1 id="page-title">Find what has yet to launch.</h1>
+          <p>A ranked view of protocols with no token on record. Explore the numbers behind each estimate and a practical plan for using the protocol.</p>
+          <p class="source" id="source"></p>
+        </div>
+        <div class="coverage" aria-label="Snapshot coverage">
+          <div><strong id="board-size">&ndash;</strong><span>protocols ranked</span></div>
+          <div><strong id="watchlist-size">&ndash;</strong><span>watchlist covered</span></div>
+          <div><strong id="live-size">&ndash;</strong><span>live comparables</span></div>
+        </div>
+      </section>
+
+      <div class="method-strip"><span id="model-version">Value model</span><p>Implied value = TVL × category ratio × growth × maturity × risk, rounded and capped</p><a href="#model">See the model</a></div>
+
+      <section id="board" class="board-section" aria-labelledby="board-title">
+        <div class="section-heading">
+          <div><h2 id="board-title">The radar</h2><p>No token recorded in the snapshot. Select a protocol to see its model and farm plan.</p></div>
+          <span class="legend"><i aria-hidden="true"></i> Watchlist protocol</span>
+        </div>
+        <div class="filters" role="search" aria-label="Filter the radar">
+          <label class="field field-search" for="search"><span>Search</span><input id="search" type="search" autocomplete="off" placeholder="Name or slug"></label>
+          <label class="field" for="category"><span>Category</span><select id="category"><option value="">All categories</option></select></label>
+          <label class="field" for="chain"><span>Chain</span><select id="chain"><option value="">All chains</option></select></label>
+          <label class="field" for="tvl-band"><span>TVL</span><select id="tvl-band"><option value="">Any TVL</option><option value="small">Under $10M</option><option value="medium">$10M to $50M</option><option value="large">$50M to $1B</option><option value="largest">$1B and above</option></select></label>
+          <label class="watch-filter"><input id="watchlist" type="checkbox"><span>Watchlist only</span></label>
+        </div>
+        <div class="board-meta"><p id="row-count" role="status" aria-live="polite"></p><button id="reset-filters" class="text-button" type="button">Clear filters</button></div>
+        <div class="table-wrap" tabindex="0" aria-label="Ranked protocols table, scroll to view all rows">
+          <table class="board-table">
+            <caption class="sr-only">Protocols ranked by implied value. Select a column heading to sort.</caption>
+            <thead><tr>
+              <th scope="col" data-sort="rank"><button type="button">Rank <span aria-hidden="true"></span></button></th>
+              <th scope="col" data-sort="name"><button type="button">Protocol <span aria-hidden="true"></span></button></th>
+              <th scope="col" data-sort="tvl_usd" class="number"><button type="button">TVL <span aria-hidden="true"></span></button></th>
+              <th scope="col" data-sort="change_7d" class="number"><button type="button">7d change <span aria-hidden="true"></span></button></th>
+              <th scope="col" data-sort="age_days" class="number"><button type="button">Age <span aria-hidden="true"></span></button></th>
+              <th scope="col" data-sort="implied_value_usd" class="number"><button type="button">Implied value <span aria-hidden="true"></span></button></th>
+            </tr></thead>
+            <tbody id="board-rows"></tbody>
+          </table>
+          <div id="empty" class="empty" hidden><strong>No protocols match these filters.</strong><span>Try a different search or clear the filters.</span></div>
+        </div>
+        <p class="board-footnote">Estimates are not token prices or a prediction that a token will launch. TVL is total value locked.</p>
+      </section>
+
+      <section id="model" class="model-section" aria-labelledby="model-title">
+        <div class="section-heading"><div><h2 id="model-title">Inside the value model</h2><p>Market comparisons from the whole snapshot provide the starting ratio. Protocol data adjusts the estimate.</p></div></div>
+        <div class="model-layout">
+          <div class="comparison-box"><h3>Category ratios</h3><p class="section-note">Applied market cap / TVL ratio and the number of live-token samples.</p><div class="small-table-wrap"><table class="small-table"><thead><tr><th scope="col">Category</th><th scope="col" class="number">Samples</th><th scope="col" class="number">Applied ratio</th></tr></thead><tbody id="category-rows"></tbody></table><p id="category-empty" class="muted" hidden>Category ratios are not available in this data.</p></div></div>
+          <div class="notes-box"><h3>Reading the estimate</h3><ul id="model-notes"></ul><p id="notes-empty" class="muted" hidden>Model notes are not available in this data.</p></div>
+        </div>
+      </section>
+
+      <section id="live" class="live-section" aria-labelledby="live-title">
+        <div class="section-heading"><div><h2 id="live-title">Live-token comparisons</h2><p>The largest recorded market caps outside CEX are shown separately from the radar. The ratios are from the snapshot, not live prices.</p></div><span class="section-count" id="live-count"></span></div>
+        <div class="small-table-wrap live-table-wrap"><table class="small-table live-table"><thead><tr><th scope="col">Protocol</th><th scope="col">Category</th><th scope="col" class="number">TVL</th><th scope="col" class="number">Market cap</th><th scope="col" class="number">Market cap / TVL</th></tr></thead><tbody id="live-rows"></tbody></table><p id="live-empty" class="muted" hidden>No live-token comparisons are available in this data.</p></div>
+      </section>
+    </main>
+    <footer><span>Token Radar for make.fun</span><span>One sealed snapshot. No live prices.</span></footer>
+  </div>
+
+  <dialog id="detail" class="detail" aria-labelledby="detail-title">
+    <div class="detail-head"><div><p id="detail-rank" class="detail-rank"></p><h2 id="detail-title"></h2><p id="detail-meta" class="detail-meta"></p></div><button id="detail-close" class="close-button" type="button" aria-label="Close protocol details">Close</button></div>
+    <div class="detail-content">
+      <section class="value-panel" aria-labelledby="value-title"><div class="value-head"><div><h3 id="value-title">Implied value</h3><p>Model estimate, not a market price</p></div><strong id="detail-value"></strong></div><p class="value-formula">TVL × category ratio × growth × maturity × risk</p><dl id="value-inputs" class="value-inputs"></dl><p id="detail-equation" class="equation"></p></section>
+      <section class="farm-panel" aria-labelledby="farm-title"><div class="farm-heading"><h3 id="farm-title">Farm plan</h3><p>Costs and time are estimates. Rewards are not guaranteed.</p></div><ol id="farm-steps" class="farm-steps"></ol></section>
+    </div>
+  </dialog>
+  <script src="../data.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
