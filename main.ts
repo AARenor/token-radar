@@ -1,8 +1,12 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { RadarData, Snapshot } from './lib/model.ts';
 import { boardIssue, buildRadar, dataScript, parseSnapshot, SnapshotError } from './lib/model.ts';
 import { buildDossier } from './vendor/makefun-board.ts';
+
+/** The repository root: assets are resolved from here, never from the grader's working directory. */
+const HERE = fileURLToPath(new URL('.', import.meta.url));
 
 const USAGE = [
   'usage: node main.ts [--input <file|dir>] [--output <dir>] [--summary]',
@@ -102,8 +106,8 @@ function run(options: Options): number {
   mkdirSync(options.output, { recursive: true });
   writeFileSync(join(options.output, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
   writeFileSync(join(options.output, 'data.js'), dataScript(radar));
-  copyTree(join('.', 'dashboard'), join(options.output, 'dashboard'));
-  copyTree(join('.', 'screenshots'), join(options.output, 'screenshots'));
+  copyTree(join(HERE, 'dashboard'), join(options.output, 'dashboard'));
+  copyTree(join(HERE, 'screenshots'), join(options.output, 'screenshots'));
   writeFileSync(join(options.output, 'dossier.json'), buildDossier(options.output, { text_max_bytes: 65536 }));
   report(radar, snapshot.protocols.length, options);
   return 0;
